@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""demo_v7.py 端到端冒烟测试：用"假检测器"代替 ultralytics，视频/图片都是脚本现场合成的，
+"""demo_v8.py 端到端冒烟测试：用"假检测器"代替 ultralytics，视频/图片都是脚本现场合成的，
 所以不需要权重、不需要联网。验证的是流程（读写、判定、CSV、证据截图、参数），不是检测精度。"""
 import contextlib
 import csv
@@ -53,7 +53,7 @@ class FakeYOLO:
 fake = types.ModuleType("ultralytics")
 fake.YOLO = FakeYOLO
 sys.modules["ultralytics"] = fake
-import demo_v7  # noqa: E402
+import demo_v8  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="smoke_v7_"))
 VIDEO, IMAGE, ZONES = str(TMP / "synthetic.mp4"), TMP / "测试图.jpg", str(ROOT / "zones.json")
@@ -70,10 +70,10 @@ buf.tofile(str(IMAGE))
 
 def run(argv, mode="bike"):
     STATE.update(n=0, mode=mode)
-    sys.argv = ["demo_v7.py"] + argv
+    sys.argv = ["demo_v8.py"] + argv
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        demo_v7.main()
+        demo_v8.main()
     return out.getvalue()
 
 
