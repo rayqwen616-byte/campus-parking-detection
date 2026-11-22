@@ -1,36 +1,68 @@
-# 模型权重（体积大，走 Releases）
+# ============ 密钥与配置（不入库）============
+.env
+.env.*
+!.env.example
+secret.py
+*.secret
+*_key.txt
+
+# ============ Python 缓存与虚拟环境 ============
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ============ 模型权重（体积大，走 Releases）============
 models/
+weights/
 *.pt
+*.pth
 *.onnx
 *.engine
 *.ov
+*.xml.bak
 
-# 数据集
+# ============ 数据集（版权与体积原因）============
 datasets/
 zones_raw/
 zones_ds/
+data/
 
-# 运行产物
+# ============ 运行产物 ============
 runs/
 runs_zones/
 _output/
 *.mp4
+*.avi
 events.csv
 zones_auto.json
 zones_preview.jpg
+*.log
+logs/
 
-# 缓存
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-.venv/
+# ============ 临时目录 ============
+tmp/
+temp/
+_build/
+_dist/
+*.spec
 
-# 系统
+# ============ 前端 ============
+node_modules/
+dist/
+build/
+.cache/
+
+# ============ 系统与编辑器 ============
+.DS_Store
 Thumbs.db
 desktop.ini
-.DS_Store
-
-# 打包产物
-_dist/
-_build/
-*.spec
+.idea/
+.vscode/
+*.swp
