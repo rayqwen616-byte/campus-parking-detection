@@ -4,9 +4,10 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 cd /d "%~dp0"
 echo ============================================
-echo  v6 多区域分级告警
+echo  v7 工程化：滞回 / gap 容错 / 骑手过滤
 echo ============================================
-"D:\yolo_env\Scripts\python.exe" demo_v6.py --source "..\_samples\sample.mp4" --model "D:\models\ebike26.pt" --zones "zones.json" --vote 3 --speed 10 --out "_output"
+"D:\yolo_env\Scripts\python.exe" demo_v7.py --source "..\_samples\sample.mp4" --model "D:\models\ebike26.pt" --zones "..\_samples\zones.json" --speed 10 --out "_output"
 echo.
-echo 结果：_output\demo.mp4 与 events.csv（含等级列）
+echo [跑测试]
+"D:\yolo_env\Scripts\python.exe" tests\run_all.py
 pause
