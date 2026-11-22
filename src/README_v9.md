@@ -193,7 +193,7 @@ D:\yolo_env\Scripts\python.exe eval_zones.py --model D:/models/zones.pt --src D:
 |---|---|---|
 | L1 | 网页只做单帧区域命中，不判违停 | 单图无法测停留时长，接口里叫 `possible_zone_conflict` |
 | L2 | 区域自动分割质量不可用 | 26 张图训练的弱模型 Mask mAP50 仅 0.065，不作为有效权重配置；优先手画或导入区域 |
-| L3 | 区域模型未随包提供 | 车辆专用模型已放在 `models/ebike26.pt`；自动区域仍需另行配置合格的 `zones.pt` |
+| L3 | 模型默认未随包提供 | 需自备 `ebike26.pt`，否则会回退到联网下载 COCO 权重 |
 | L4 | 数据集仅 895 张、2 类 | 无三轮车，泛化性有限 |
 | L5 | 未在硬件上实测 | 无 FPS/功耗数据 |
 

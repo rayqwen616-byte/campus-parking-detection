@@ -18,24 +18,28 @@ webapp.py —— 单图识别网页演示（v9）
     POST /api/zones    {image: dataURL, confidence: 0.25}   需要 models/zones.pt
 """
 import argparse
+import binascii
 import base64
 import io
 import json
 import math
+import os
 import time
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from judge_core import DEFAULT_VEHICLE_LABELS, Zone
+from judge_core import DEFAULT_VEHICLE_LABELS, Zone, resolve_keep_labels
 from predict_zones import mask_to_polygons
 
 BASE = Path(__file__).resolve().parent
 MAX_BYTES = 18 * 1024 * 1024
+MAX_PIXELS = 40_000_000
 CN = {"bicycle": "自行车", "cycle": "自行车", "bike": "自行车",
       "ebike": "电动车", "e-bike": "电动车", "electric_bike": "电动车",
       "motorcycle": "电动车/摩托车", "motorbike": "电动车/摩托车",
@@ -44,14 +48,31 @@ CN = {"bicycle": "自行车", "cycle": "自行车", "bike": "自行车",
 
 def decode_data_url(data_url):
     """dataURL -> BGR ndarray；用 PIL 读，兼容中文与 EXIF 方向"""
-    if not isinstance(data_url, str) or not data_url.startswith("data:image/"):
+    if not isinstance(data_url, str):
         raise ValueError("图片格式不正确")
-    raw = base64.b64decode(data_url.split(",", 1)[1])
+    header, sep, encoded = data_url.partition(",")
+    if not sep or header.lower() not in {
+            "data:image/jpeg;base64", "data:image/jpg;base64",
+            "data:image/png;base64", "data:image/webp;base64"}:
+        raise ValueError("只支持 JPEG、PNG 或 WEBP 图片")
+    if len(encoded) > ((MAX_BYTES + 2) // 3) * 4:
+        raise ValueError("图片太大")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("图片数据不是有效的 Base64") from exc
     if len(raw) > MAX_BYTES:
         raise ValueError("图片太大")
-    img = Image.open(io.BytesIO(raw))
-    img = ImageOps.exif_transpose(img).convert("RGB")
-    img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+    try:
+        with Image.open(io.BytesIO(raw)) as source:
+            if source.format not in {"JPEG", "PNG", "WEBP"}:
+                raise ValueError("图片内容格式与支持的格式不符")
+            if source.width <= 0 or source.height <= 0 or source.width * source.height > MAX_PIXELS:
+                raise ValueError("图片像素过大")
+            img = ImageOps.exif_transpose(source).convert("RGB")
+            img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("无法解码图片，请换用有效的 JPEG、PNG 或 WEBP 文件") from exc
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 
@@ -64,13 +85,19 @@ def encode_jpeg(img, quality=88):
 
 def zones_from_payload(items, w, h):
     """前端传来的区域列表 -> judge_core.Zone（与视频判定同一套类）"""
-    if not items:
+    if items is None:
         return []
     if not isinstance(items, list) or len(items) > 10:
         raise ValueError("区域必须是列表且不超过 10 个")
     zones = []
+    seen_names = set()
     for it in items:
+        if not isinstance(it, dict):
+            raise ValueError("区域必须是对象")
         name = str(it.get("name", "禁停区")).strip()[:40] or "禁停区"
+        if name in seen_names:
+            raise ValueError("区域名称不能重复")
+        seen_names.add(name)
         level = int(it.get("level", 1))
         if level not in (1, 2, 3):
             raise ValueError("区域等级必须是 1、2 或 3")
@@ -88,9 +115,15 @@ def zones_from_payload(items, w, h):
         color = tuple(int(c) for c in it.get("color", (0, 0, 255)))
         if len(color) != 3 or any(not 0 <= c <= 255 for c in color):
             raise ValueError("颜色必须是 3 个 0 到 255 的数")
-        zones.append(Zone(name, level, float(it.get("dwell", 180)),
+        dwell = float(it.get("dwell", 180))
+        cooldown = float(it.get("cooldown", 600))
+        if not math.isfinite(dwell) or dwell <= 0:
+            raise ValueError("停留阈值必须是大于 0 的有限数字")
+        if not math.isfinite(cooldown) or cooldown < 0:
+            raise ValueError("冷却时间必须是大于或等于 0 的有限数字")
+        zones.append(Zone(name, level, dwell,
                           np.array(arr, dtype=np.float32),
-                          float(it.get("cooldown", 600)), color))
+                          cooldown, color))
     return zones
 
 
@@ -129,12 +162,14 @@ class State:
     seg_model = None
     model_path = None
     keep = set(DEFAULT_VEHICLE_LABELS)
+    inference_lock = threading.Lock()
 
 
 def detect(image, confidence, zones, keep=None):
     h, w = image.shape[:2]
     keep = State.keep if keep is None else keep
-    res = State.model(image, conf=float(confidence), iou=0.45, verbose=False)[0]
+    with State.inference_lock:
+        res = State.model(image, conf=float(confidence), iou=0.45, verbose=False)[0]
     names = res.names if isinstance(res.names, dict) else {i: n for i, n in enumerate(res.names)}
     dets = []
     if res.boxes is not None:
@@ -185,7 +220,7 @@ def zones_from_segmentation(res, w, h):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CampusBikeV9/1.0"
+    server_version = "CampusBikeV10/1.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -201,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        path = unquote(urlparse(self.path).path)
         if path == "/api/health":
             return self._json(200, {
                 "ok": True,
@@ -215,7 +250,11 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         web_root = (BASE / "web").resolve()
         f = (web_root / path.lstrip("/")).resolve()
-        if not str(f).startswith(str(web_root)) or not f.is_file():
+        try:
+            f.relative_to(web_root)
+        except ValueError:
+            return self._send(404, b"not found", "text/plain; charset=utf-8")
+        if not f.is_file():
             return self._send(404, b"not found", "text/plain; charset=utf-8")
         ctype = {"html": "text/html; charset=utf-8",
                  "js": "text/javascript; charset=utf-8",
@@ -231,17 +270,25 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_BYTES * 2:
                 raise ValueError("请求体大小不合法")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if self.headers.get_content_type() != "application/json":
+                raise ValueError("请求必须使用 application/json")
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError("请求体未完整接收")
+            payload = json.loads(body.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("请求内容必须是 JSON 对象")
             image = decode_data_url(payload.get("image"))
             conf = float(payload.get("confidence", 0.25))
-            if not 0 < conf < 1:
+            if not math.isfinite(conf) or not 0 < conf < 1:
                 raise ValueError("置信度必须在 0 到 1 之间")
 
             if route == "/api/zones":
                 if State.seg_model is None:
                     raise ValueError("未加载区域分割模型（需要 models/zones.pt）")
                 h, w = image.shape[:2]
-                res = State.seg_model(image, conf=max(conf, 0.25), verbose=False)[0]
+                with State.inference_lock:
+                    res = State.seg_model(image, conf=max(conf, 0.25), verbose=False)[0]
                 zones_out = zones_from_segmentation(res, w, h)
                 return self._json(200, {"ok": True, "zones": zones_out,
                                         "count": len(zones_out)})
@@ -260,14 +307,21 @@ class Handler(BaseHTTPRequestHandler):
                 "annotated_image": encode_jpeg(vis),
                 "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
             })
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError,
+                binascii.Error, OSError, OverflowError) as e:
             return self._json(400, {"ok": False, "error": str(e)})
+        except Exception as e:
+            print("[请求错误] %r" % (e,))
+            return self._json(500, {"ok": False, "error": "服务器处理失败，请检查服务日志"})
 
 
 def pick_zone_model(explicit):
     """自动找区域分割模型：models/zones.pt → D:/models/zones.pt → 最新训练结果"""
     if explicit:
         return Path(explicit) if Path(explicit).is_file() else None
+    env_model = os.environ.get("CAMPUS_ZONES_MODEL")
+    if env_model and Path(env_model).is_file():
+        return Path(env_model)
     for c in (BASE / "models" / "zones.pt",
               Path("D:/models/zones.pt"),
               BASE.parent / "models" / "zones.pt"):
@@ -281,6 +335,9 @@ def pick_zone_model(explicit):
 def pick_model(explicit):
     if explicit:
         return Path(explicit)
+    env_model = os.environ.get("CAMPUS_BIKE_MODEL")
+    if env_model and Path(env_model).is_file():
+        return Path(env_model)
     for c in (BASE / "models" / "ebike26.pt",
               BASE.parent / "models" / "ebike26.pt",
               Path("D:/models/ebike26.pt"),
@@ -294,21 +351,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=None)
     ap.add_argument("--zone-model", default=None, help="可选：区域分割模型")
-    ap.add_argument("--keep", default=",".join(DEFAULT_VEHICLE_LABELS),
-                    help="保留的模型类别，逗号分隔；通用权重可显式加入 motorcycle")
+    ap.add_argument("--keep", default="auto",
+                    help="auto=保留模型现有的常见非机动车类别；也可填写逗号分隔的类别名")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
 
     from ultralytics import YOLO
 
-    State.keep = {c.strip() for c in args.keep.split(",") if c.strip()}
-    if not State.keep:
-        ap.error("--keep 至少需要一个类别")
     State.model_path = pick_model(args.model)
     print("[模型] %s" % State.model_path)
     State.model = YOLO(str(State.model_path))
     names = State.model.names
+    try:
+        State.keep = resolve_keep_labels(args.keep, names)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if not State.keep:
+        ap.error("所选模型没有可用的白名单类别；请检查模型类别或显式设置 --keep")
     print("[类别] %s" % (list(names.values()) if isinstance(names, dict) else names))
     print("[保留类别] %s" % ", ".join(sorted(State.keep)))
 

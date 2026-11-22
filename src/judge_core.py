@@ -31,6 +31,27 @@ import numpy as np
 
 
 DEFAULT_VEHICLE_LABELS = ("ebike", "bicycle")
+AUTO_VEHICLE_LABELS = {
+    "ebike", "e-bike", "electric_bike", "electric bicycle",
+    "bicycle", "bike", "cycle", "motorcycle", "motorbike", "tricycle",
+}
+
+
+def resolve_keep_labels(value: str, names):
+    """把 auto 或逗号分隔白名单解析为模型真实类别名。
+
+    通用 COCO 权重没有 ebike 类别，但有 motorcycle；auto 会只启用当前模型
+    实际具备的常见非机动车类别，避免静默漏掉模型支持的车辆类型。
+    """
+    values = names if isinstance(names, dict) else dict(enumerate(names))
+    name_map = {str(name).casefold(): str(name) for name in values.values()}
+    if value.strip().casefold() == "auto":
+        return {name_map[label] for label in AUTO_VEHICLE_LABELS if label in name_map}
+    requested = {part.strip().casefold() for part in value.split(",") if part.strip()}
+    missing = requested - set(name_map)
+    if missing:
+        raise ValueError("模型中不存在这些类别: " + ", ".join(sorted(missing)))
+    return {name_map[label] for label in requested}
 
 
 # ----------------------------------------------------------------- geometry
@@ -79,18 +100,39 @@ def load_zones(path: str, w: int, h: int):
         raw = json.load(f)
     items = raw["zones"] if isinstance(raw, dict) else raw
     zones = []
+    seen_names = set()
     for z in items:
         try:
             pts = np.array(z["points"] if "points" in z else z["polygon"], dtype=np.float32)
             if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 3:
                 raise ValueError("多边形至少 3 个 (x,y) 点")
+            if not np.isfinite(pts).all() or np.any(pts < 0):
+                raise ValueError("多边形坐标必须是有限的非负数字")
             if pts.max() <= 1.0:
                 pts = pts * np.array([w, h], dtype=np.float32)
+            if np.any(pts[:, 0] > w) or np.any(pts[:, 1] > h):
+                raise ValueError("多边形顶点超出画面尺寸")
+            name = str(z["name"]).strip()
+            if not name:
+                raise ValueError("区域名称不能为空")
+            if name in seen_names:
+                raise ValueError(f"区域名称重复：{name}")
+            seen_names.add(name)
+            level = int(z.get("level", 3))
+            if level not in (1, 2, 3):
+                raise ValueError("区域等级必须是 1、2 或 3")
             dwell = z["dwell"] if "dwell" in z else z["dwell_s"]
             cool = z.get("cooldown", z.get("cooldown_s"))
-            zones.append(Zone(str(z["name"]), int(z.get("level", 3)), float(dwell), pts,
-                              None if cool is None else float(cool),
-                              tuple(int(c) for c in z.get("color", (0, 0, 255)))))
+            dwell = float(dwell)
+            cool = None if cool is None else float(cool)
+            if not math.isfinite(dwell) or dwell <= 0:
+                raise ValueError("停留阈值必须是大于 0 的有限数字")
+            if cool is not None and (not math.isfinite(cool) or cool < 0):
+                raise ValueError("冷却时间必须是大于或等于 0 的有限数字")
+            color = tuple(int(c) for c in z.get("color", (0, 0, 255)))
+            if len(color) != 3 or any(c < 0 or c > 255 for c in color):
+                raise ValueError("颜色必须是 3 个 0 到 255 的数")
+            zones.append(Zone(name, level, dwell, pts, cool, color))
         except (KeyError, ValueError, TypeError) as e:
             raise ValueError(f"zones.json 中有无效区域 {z!r}: {e!r}") from e
     if not zones:

@@ -32,7 +32,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from judge_core import DEFAULT_VEHICLE_LABELS, JudgeConfig, ParkingJudge, WeComNotifier, foot, load_zones
+from judge_core import JudgeConfig, ParkingJudge, WeComNotifier, foot, load_zones, resolve_keep_labels
 
 CN = {"bicycle": "自行车", "motorcycle": "摩托", "ebike": "电动车", "tricycle": "三轮车"}
 COLOR_OK = (0, 200, 0)         # 不在任何区域
@@ -40,6 +40,22 @@ COLOR_WAIT = (0, 215, 255)     # 在区域内但未达标
 COLOR_RIDER = (200, 200, 200)  # 有人骑/扶着
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 LEVEL_NAME = {1: "一级（立即处理）", 2: "二级（尽快处理）", 3: "三级（例行处理）"}
+BASE = Path(__file__).resolve().parent
+
+
+def pick_model(explicit):
+    if explicit:
+        return explicit
+    env_model = os.environ.get("CAMPUS_BIKE_MODEL")
+    if env_model and Path(env_model).is_file():
+        return str(Path(env_model))
+    for candidate in (BASE / "models" / "ebike26.pt",
+                      BASE.parent / "models" / "ebike26.pt",
+                      Path("D:/models/ebike26.pt"),
+                      BASE / "yolo26n.pt"):
+        if candidate.is_file():
+            return str(candidate)
+    return "yolo11n.pt"
 
 
 # ---------------- 工具 ----------------
@@ -236,8 +252,10 @@ def run_video(args, model, names, keep, out_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="视频 / 图片路径，或 0 表示摄像头")
-    ap.add_argument("--model", default="yolo11n.pt")
-    ap.add_argument("--keep", default=",".join(DEFAULT_VEHICLE_LABELS))
+    ap.add_argument("--model", default=None,
+                    help="模型权重；默认自动查找 ebike26.pt，再回退通用 YOLO")
+    ap.add_argument("--keep", default="auto",
+                    help="auto=保留模型中常见非机动车类别；也可填写逗号分隔类别名")
     ap.add_argument("--zones", default="zones.json")
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--iou", type=float, default=0.45)
@@ -257,12 +275,18 @@ def main():
         raise SystemExit("--stride 必须 >= 1")
     if not Path(args.zones).exists():
         raise SystemExit(f"找不到区域配置：{args.zones}")
-    keep = {c.strip() for c in args.keep.split(",") if c.strip()} or None
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    args.model = pick_model(args.model)
     model = YOLO(args.model)
     names = model.names
+    try:
+        keep = resolve_keep_labels(args.keep, names)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if not keep:
+        ap.error("所选模型没有常见非机动车类别；请检查模型类别或显式设置 --keep")
     if Path(args.source).suffix.lower() in IMG_EXT:
         run_image(args, model, names, keep, out_dir)
     else:
