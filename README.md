@@ -201,6 +201,35 @@ python src/tests/run_all.py
 
 ---
 
+## 十一、环境变量与协作
+
+### 环境变量
+
+复制模板后按需填写（`.env` 不会入库）：
+
+```bash
+copy .env.example .env
+```
+
+| 变量 | 用途 |
+|---|---|
+| `WECOM_WEBHOOK` | 企业微信机器人地址（告警推送，可选） |
+| `CAMPUS_BIKE_MODEL` | 检测模型路径（可选） |
+| `CAMPUS_ZONES_MODEL` | 区域模型路径（可选） |
+| `PORT` | 服务端口（默认 8000） |
+
+**禁止把 webhook、密钥写进代码。**
+
+### 协作规范
+
+多人开发请先读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+
+- `main` 只有组长能推，且必须 6 组测试全绿
+- 新功能走 `feat/xxx`，修 bug 走 `fix/xxx`，提 PR 后合并
+- 权重、数据集、`.env` 一律不入库
+
+---
+
 ## English Abstract
 
 A YOLO-based system for detecting illegally parked e-bikes and bicycles on campus.
