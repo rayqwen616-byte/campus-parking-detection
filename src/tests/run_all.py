@@ -2,6 +2,14 @@
 """一键运行全部测试：python tests/run_all.py"""
 import os
 import subprocess
+import sys as _sys
+
+# Windows 默认 cp1252 时，打印中文测试名会 UnicodeEncodeError
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import sys
 from pathlib import Path
 
