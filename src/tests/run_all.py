@@ -13,6 +13,7 @@ JOBS = [
     ("demo_v8 端到端冒烟", [str(ROOT / "tests" / "smoke_v8.py")]),
     ("voc2yolo 配对逻辑", [str(ROOT / "tests" / "test_voc2yolo.py")]),
     ("webapp 后端单测", [str(ROOT / "tests" / "test_webapp.py")]),
+    ("eval_zones 几何评测", [str(ROOT / "tests" / "test_eval_zones.py")]),
     ("predict_zones 掩码提取", [str(ROOT / "tests" / "test_predict_zones.py")]),
 ]
 

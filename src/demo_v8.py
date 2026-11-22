@@ -32,7 +32,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from judge_core import JudgeConfig, ParkingJudge, WeComNotifier, foot, load_zones
+from judge_core import DEFAULT_VEHICLE_LABELS, JudgeConfig, ParkingJudge, WeComNotifier, foot, load_zones
 
 CN = {"bicycle": "自行车", "motorcycle": "摩托", "ebike": "电动车", "tricycle": "三轮车"}
 COLOR_OK = (0, 200, 0)         # 不在任何区域
@@ -237,7 +237,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="视频 / 图片路径，或 0 表示摄像头")
     ap.add_argument("--model", default="yolo11n.pt")
-    ap.add_argument("--keep", default="ebike,bicycle")
+    ap.add_argument("--keep", default=",".join(DEFAULT_VEHICLE_LABELS))
     ap.add_argument("--zones", default="zones.json")
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--iou", type=float, default=0.45)

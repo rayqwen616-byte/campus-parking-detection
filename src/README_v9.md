@@ -1,7 +1,24 @@
-# 校园非机动车违停检测 v8（合并版）
+# 校园非机动车违停检测 v9（可信度修正版）
 
-> 由三个来源合并而来，取各自最强之处：
->
+v9 保留 v8 的全部功能，重点修正网页结果可信度，不覆盖旧版本。
+
+## 一、v9 相对 v8 的改动
+
+| 改动 | 文件 | 说明 |
+|---|---|---|
+| **车辆类别白名单** | `judge_core.py`、`demo_v8.py`、`webapp.py` | 网页与视频共用默认类别 `ebike,bicycle`，通用模型返回的人、汽车等不再计入非机动车统计 |
+| **可选类别参数** | `webapp.py` | 新增 `--keep`；通用权重确需保留摩托车时，可显式使用 `--keep ebike,bicycle,motorcycle` |
+| **普通通道排除** | `webapp.py` | 自动区域只接受 `forbidden`，`passage` 不再生成 L3 禁停区 |
+| **标注图显示修复** | `web/index.html` | 移除重复拼接的 data URL 前缀，标注图和下载地址可正常加载 |
+| **回归测试** | `tests/test_webapp.py` | 网页后端由 11 项增至 13 项，覆盖杂类过滤和 forbidden/passage 混合结果 |
+| **测试入口补齐** | `tests/run_all.py` | 将已有 `test_eval_zones.py` 纳入一键测试，实际运行 6 组 |
+
+> 单图结果仍只表示“位于禁停区内”，不代表已满足停留时长。区域自动分割模型仍不可用于正式演示，优先手画或导入区域。
+
+---
+
+## 二、v8 已有基础
+
 > | 来源 | 贡献 |
 > |---|---|
 > | **Claude v7** | `judge_core.py` 判定核心、`demo_v8.py`、`eval_events.py`、测试框架 |
@@ -9,9 +26,7 @@
 > | **GPT** | 单图识别思路、中文路径处理、输入校验 |
 > | **本项目原有** | 零填充配对思路、zones.json 规范、区域分割链路 |
 
----
-
-## 一、v8 相对 v7 的改动
+### v8 相对 v7 的改动
 
 | 改动 | 文件 | 说明 |
 |---|---|---|
@@ -65,6 +80,12 @@ D:\yolo_env\Scripts\python.exe webapp.py --model D:\models\ebike26.pt --port 800
 
 模型查找顺序：`models/ebike26.pt` → `../models/ebike26.pt` → `D:\models\ebike26.pt` → 本目录 `yolo26n.pt` → `yolo11n.pt`（最后这条会联网下载）。
 
+默认只保留 `ebike,bicycle`。使用 COCO 通用权重且确实需要摩托车时，必须显式启用，避免把其他 78 类目标计入结果：
+
+```cmd
+D:\yolo_env\Scripts\python.exe webapp.py --model yolo26n.pt --keep ebike,bicycle,motorcycle
+```
+
 ### 3.2 视频判定
 
 ```cmd
@@ -98,6 +119,28 @@ D:\yolo_env\Scripts\python.exe tests\run_all.py
 [PASS] predict_zones 掩码提取
 全部通过
 ```
+
+### 3.4 真实视频事件评测
+
+事件指标必须来自人工标注，不能用程序自己的告警充当真实答案，也不能把冒烟测试的 1 条事件当作模型性能。
+
+1. 选择未参与调参的视频，覆盖路过、骑行、静止停放、遮挡和多车场景。
+2. 使用真实时间轴运行，`--speed 1` 不要改成加速演示值：
+
+```cmd
+D:\yolo_env\Scripts\python.exe demo_v8.py --source 评测视频.mp4 ^
+    --model D:\models\ebike26.pt --zones zones.json --speed 1 --out runs\eval_video
+```
+
+3. 复制 `gt_template.csv` 为 `gt.csv`，每次真实违停填写一行“区域、开始秒、结束秒”；区域名称必须与配置完全一致。
+4. 将 `--duration` 换成视频实际总秒数：
+
+```cmd
+D:\yolo_env\Scripts\python.exe eval_events.py --events runs\eval_video\events.csv ^
+    --gt gt.csv --duration 300
+```
+
+输出 TP、FP、FN、precision、recall、平均告警延迟和每小时误报数。当前尚未为新增真实视频制作人工标注，因此 v9 不虚构这些指标。
 
 ---
 
@@ -149,8 +192,8 @@ D:\yolo_env\Scripts\python.exe eval_zones.py --model D:/models/zones.pt --src D:
 | 编号 | 限制 | 影响 |
 |---|---|---|
 | L1 | 网页只做单帧区域命中，不判违停 | 单图无法测停留时长，接口里叫 `possible_zone_conflict` |
-| L2 | 区域自动分割未训练 | `/api/zones` 需要 `models/zones.pt`，当前返回 400 |
-| L3 | 模型默认未随包提供 | 需自备 `ebike26.pt`，否则会回退到联网下载 COCO 权重 |
+| L2 | 区域自动分割质量不可用 | 26 张图训练的弱模型 Mask mAP50 仅 0.065，不作为有效权重配置；优先手画或导入区域 |
+| L3 | 区域模型未随包提供 | 车辆专用模型已放在 `models/ebike26.pt`；自动区域仍需另行配置合格的 `zones.pt` |
 | L4 | 数据集仅 895 张、2 类 | 无三轮车，泛化性有限 |
 | L5 | 未在硬件上实测 | 无 FPS/功耗数据 |
 
@@ -226,7 +269,7 @@ D:\yolo_env\Scripts\python.exe eval_zones.py --model D:/models/zones.pt --src D:
 
 ---
 
-## 九、本次代码改进
+## 九、v8 区域链路改进记录
 
 | 文件 | 改进 |
 |---|---|
@@ -245,6 +288,15 @@ D:\yolo_env\Scripts\python.exe eval_zones.py --model D:/models/zones.pt --src D:
 [PASS] webapp 后端单测
 [PASS] eval_zones 几何评测
 [PASS] predict_zones 掩码提取
-[PASS] predict_zones 掩码提取
 全部通过
 ```
+
+---
+
+## 十、v9 验证记录（2026-11-17）
+
+- `tests/run_all.py`：6 组全部通过，其中网页后端 13 项单测通过。
+- `web/index.html`：两段 JavaScript 均通过语法检查。
+- 使用 `D:\models\ebike26.pt` 在浏览器实际上传 `_samples/sample_1.jpg`，全图区域下检出 2 辆 `ebike`，区内 2、区外 0。
+- 标注图实际加载尺寸为 1279×1706，data URL 前缀仅 1 个；CSV 下载可用，当前页面控制台无错误。
+- 未进行带人工 GT 的新视频事件评测，因此没有新增 precision、recall 或误报率数字。

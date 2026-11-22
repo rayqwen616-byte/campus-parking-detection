@@ -26,7 +26,7 @@
   <div class="badge" id="modelBadge">正在读取模型信息…</div>
 </header>
 <main>
-  <div class="notice">单张图片没有连续时间信息，因此本演示判断的是“车辆是否位于所画禁停区内”，不等同于已经满足停留时长的正式违停告警。通用权重中的 motorcycle 类别会标为“电动车/摩托车”；有项目训练的 ebike26.pt 时，可通过启动参数替换。</div>
+  <div class="notice">单张图片没有连续时间信息，因此本演示判断的是“车辆是否位于所画禁停区内”，不等同于已经满足停留时长的正式违停告警。默认只保留 ebike 和 bicycle，避免通用权重把人、汽车等计入结果；如需保留 motorcycle，请通过启动参数 --keep ebike,bicycle,motorcycle 显式启用。</div>
   <div class="layout">
     <aside class="panel">
       <h2><span class="step">1</span>选择一张图片</h2>
@@ -42,7 +42,7 @@
       <button class="btn wide" id="autoZone" style="margin-top:8px" disabled>自动识别禁停区（未配置权重）</button>
       <div class="zone-buttons" style="margin-top:8px"><button class="btn" id="importZone">导入区域 JSON</button><button class="btn" id="exportZone">导出区域 JSON</button></div>
       <input id="zoneFile" type="file" accept="application/json,.json" class="hidden">
-      <p class="small-tip">可手画、导入原项目 zones.json，或在配置 zones_best.pt 后自动识别。自动结果必须人工核对。</p>
+      <p class="small-tip">可手画、导入原项目 zones.json，或在配置 zones.pt 后自动识别。自动结果必须人工核对。</p>
       <div class="divider"></div>
       <h2><span class="step">3</span>运行模型</h2>
       <div class="field"><label for="confidence">置信度阈值 <output id="confValue">0.25</output></label><input id="confidence" type="range" min="0.05" max="0.95" step="0.05" value="0.25"></div>
@@ -179,7 +179,7 @@ $('exportZone').onclick=()=>{
 fetch('/api/health').then(response=>response.json()).then(data=>{
   $('modelBadge').textContent=`车辆模型 · ${data.model}`;
   if(data.zone_model_available){$('autoZone').disabled=false;$('autoZone').textContent='自动识别禁停区';$('autoZone').title=`区域模型：${data.zone_model}`}
-  else $('autoZone').title='将训练好的 zones_best.pt 放入项目目录并重启后启用';
+  else $('autoZone').title='将训练好的 zones.pt 放入项目目录并重启后启用';
 }).catch(()=>{$('modelBadge').textContent='模型服务未连接'});
 $('confidence').oninput=e=>$('confValue').textContent=Number(e.target.value).toFixed(2);
 function csvCell(value){let text=String(value??'');if(/^[=+\-@\t\r]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'}
@@ -190,7 +190,7 @@ $('detect').onclick=async()=>{
   try{
     const response=await fetch('/api/detect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:state.image.src,confidence:Number($('confidence').value),zones:state.zones})});
     const data=await response.json();if(!response.ok)throw new Error(data.error||'识别失败');
-    state.resultUrl=`data:image/jpeg;base64,${data.annotated_image}`;$('resultImage').src=state.resultUrl;$('resultImage').classList.remove('hidden');$('resultEmpty').classList.add('hidden');
+    state.resultUrl=data.annotated_image;$('resultImage').src=state.resultUrl;$('resultImage').classList.remove('hidden');$('resultEmpty').classList.add('hidden');
     $('total').textContent=data.summary.total;$('inside').textContent=data.summary.inside;$('outside').textContent=data.summary.outside;$('stats').classList.remove('hidden');
     $('download').href=state.resultUrl;$('download').classList.add('ready');state.lastResult=data;
     const rows=[['类别','模型类别','置信度','区域判断','区域','等级','落脚点X','落脚点Y','框X1','框Y1','框X2','框Y2'],...data.detections.map(d=>[d.label,d.model_label,d.confidence,d.status==='inside'?'疑似违停':d.status==='outside'?'禁停区外':'未设置禁停区',d.zone||'',d.level||'',...d.foot,...d.box])];
@@ -206,14 +206,14 @@ function escapeHtml(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&am
 </script>
 
 <style>
-#v8badge{position:fixed;top:10px;right:14px;z-index:99999;background:#1f3864;color:#fff;
+#versionBadge{position:fixed;top:10px;right:14px;z-index:99999;background:#1f3864;color:#fff;
   font:12px/1.7 "Microsoft YaHei",Arial,sans-serif;padding:5px 12px;border-radius:14px;
   opacity:.92;box-shadow:0 2px 8px rgba(0,0,0,.25);letter-spacing:.3px}
 </style>
-<div id="v8badge">v8 本地版 · 就绪</div>
+<div id="versionBadge">v9 本地版 · 就绪</div>
 <script>
 (function(){
-  var badge=document.getElementById('v8badge');
+  var badge=document.getElementById('versionBadge');
   if(!badge) return;
   var orig=window.fetch;
   window.fetch=async function(){
@@ -222,7 +222,7 @@ function escapeHtml(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&am
     var u=String((arguments[0]&&arguments[0].url)||arguments[0]||'');
     if(u.indexOf('/api/detect')>=0){
       var ms=Math.round(performance.now()-t0);
-      badge.textContent='v8 本地版 · '+ms+' ms/张';
+      badge.textContent='v9 本地版 · '+ms+' ms/张';
     }
     return r;
   };

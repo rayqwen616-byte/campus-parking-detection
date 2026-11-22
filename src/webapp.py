@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-webapp.py —— 单图识别网页演示（v8）
+webapp.py —— 单图识别网页演示（v9）
 
 前端来自 Kimi 的方案（web/index.html），后端重写为直接调用 judge_core 的 Zone，
 保证「网页单图」与「视频判定」使用同一套区域实现（单一真相源）。
@@ -31,7 +31,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from judge_core import Zone
+from judge_core import DEFAULT_VEHICLE_LABELS, Zone
 from predict_zones import mask_to_polygons
 
 BASE = Path(__file__).resolve().parent
@@ -59,8 +59,7 @@ def encode_jpeg(img, quality=88):
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         raise ValueError("结果图编码失败")
-    # 前端会自己拼 "data:image/jpeg;base64," 前缀，这里只返回纯 base64
-    return base64.b64encode(buf.tobytes()).decode()
+    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
 
 
 def zones_from_payload(items, w, h):
@@ -129,10 +128,12 @@ class State:
     model = None
     seg_model = None
     model_path = None
+    keep = set(DEFAULT_VEHICLE_LABELS)
 
 
-def detect(image, confidence, zones):
+def detect(image, confidence, zones, keep=None):
     h, w = image.shape[:2]
+    keep = State.keep if keep is None else keep
     res = State.model(image, conf=float(confidence), iou=0.45, verbose=False)[0]
     names = res.names if isinstance(res.names, dict) else {i: n for i, n in enumerate(res.names)}
     dets = []
@@ -140,12 +141,14 @@ def detect(image, confidence, zones):
         for box, cid, conf in zip(res.boxes.xyxy.cpu().numpy(),
                                   res.boxes.cls.cpu().numpy().astype(int),
                                   res.boxes.conf.cpu().numpy()):
+            label = str(names.get(int(cid), int(cid)))
+            if keep and label not in keep:
+                continue
             x1, y1, x2, y2 = [int(round(float(v))) for v in box]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w - 1, x2), min(h - 1, y2)
             foot = ((x1 + x2) / 2.0, float(y2))
             zone = find_zone(zones, foot)
-            label = str(names.get(int(cid), int(cid)))
             dets.append({
                 "label": CN.get(label, label),
                 "model_label": label,
@@ -161,8 +164,28 @@ def detect(image, confidence, zones):
     return dets, {"total": len(dets), "inside": inside, "outside": len(dets) - inside}
 
 
+def zones_from_segmentation(res, w, h):
+    zones_out = []
+    if res.masks is None:
+        return zones_out
+    names = res.names if isinstance(res.names, dict) else {i: n for i, n in enumerate(res.names)}
+    classes = (res.boxes.cls.cpu().numpy().astype(int)
+               if res.boxes is not None else [])
+    for i, mask in enumerate(res.masks.data.cpu().numpy()):
+        cid = int(classes[i]) if i < len(classes) else -1
+        if str(names.get(cid, "")) != "forbidden":
+            continue
+        for poly in mask_to_polygons(mask, w, h, 0.01, 0.005, 7, True):
+            zones_out.append({
+                "name": f"禁停区{len(zones_out) + 1}",
+                "level": 1,
+                "points": poly,
+            })
+    return zones_out
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CampusBikeV8/1.0"
+    server_version = "CampusBikeV9/1.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -184,6 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "model_loaded": State.model is not None,
                 "model": Path(State.model_path).name if State.model_path else None,
+                "keep": sorted(State.keep),
                 "zone_model_available": State.seg_model is not None,
                 "zone_model": Path(getattr(State.seg_model, "ckpt_path", "zones.pt")).name if State.seg_model else None,
             })
@@ -218,21 +242,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("未加载区域分割模型（需要 models/zones.pt）")
                 h, w = image.shape[:2]
                 res = State.seg_model(image, conf=max(conf, 0.25), verbose=False)[0]
-                zones_out = []
-                if res.masks is not None:
-                    names = res.names if isinstance(res.names, dict) else                         {i: n for i, n in enumerate(res.names)}
-                    classes = (res.boxes.cls.cpu().numpy().astype(int)
-                               if res.boxes is not None else [])
-                    for i, mask in enumerate(res.masks.data.cpu().numpy()):
-                        cid = int(classes[i]) if i < len(classes) else 0
-                        cname = str(names.get(cid, "forbidden"))
-                        for poly in mask_to_polygons(mask, w, h, 0.01, 0.005, 7, True):
-                            zones_out.append({
-                                "name": ("禁停区" if cname == "forbidden" else "通道")
-                                        + str(len(zones_out) + 1),
-                                "level": 1 if cname == "forbidden" else 3,
-                                "points": poly,
-                            })
+                zones_out = zones_from_segmentation(res, w, h)
                 return self._json(200, {"ok": True, "zones": zones_out,
                                         "count": len(zones_out)})
 
@@ -284,17 +294,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=None)
     ap.add_argument("--zone-model", default=None, help="可选：区域分割模型")
+    ap.add_argument("--keep", default=",".join(DEFAULT_VEHICLE_LABELS),
+                    help="保留的模型类别，逗号分隔；通用权重可显式加入 motorcycle")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
 
     from ultralytics import YOLO
 
+    State.keep = {c.strip() for c in args.keep.split(",") if c.strip()}
+    if not State.keep:
+        ap.error("--keep 至少需要一个类别")
     State.model_path = pick_model(args.model)
     print("[模型] %s" % State.model_path)
     State.model = YOLO(str(State.model_path))
     names = State.model.names
     print("[类别] %s" % (list(names.values()) if isinstance(names, dict) else names))
+    print("[保留类别] %s" % ", ".join(sorted(State.keep)))
 
     zm = pick_zone_model(args.zone_model)
     if zm:

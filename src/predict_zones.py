@@ -49,12 +49,7 @@ def clean_mask(mask, ksize=7):
 
 def mask_to_polygons(mask, w, h, eps_ratio=0.01, min_area_ratio=0.005,
                      morph=7, all_contours=False):
-    """掩码 → 若干多边形（归一化坐标）
-
-    注意：ultralytics 返回的 masks.data 分辨率不是原图（比如 1279x1706 的图
-    会给出 480x640 的掩码）。归一化必须用掩码自身尺寸，否则坐标整体错位。
-    """
-    mh, mw = mask.shape[:2]
+    """掩码 → 若干多边形（归一化坐标）"""
     m = clean_mask(mask, morph)
     contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -64,13 +59,13 @@ def mask_to_polygons(mask, w, h, eps_ratio=0.01, min_area_ratio=0.005,
 
     out = []
     for cnt in contours:
-        if cv2.contourArea(cnt) / float(mw * mh) < min_area_ratio:
+        if cv2.contourArea(cnt) / float(w * h) < min_area_ratio:
             continue
         peri = cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, eps_ratio * peri, True).reshape(-1, 2)
         if len(approx) < 3:
             continue
-        out.append([[round(float(x) / mw, 4), round(float(y) / mh, 4)] for x, y in approx])
+        out.append([[round(float(x) / w, 4), round(float(y) / h, 4)] for x, y in approx])
     out.sort(key=lambda p: -cv2.contourArea(np.array(p, dtype=np.float32)))
     return out
 

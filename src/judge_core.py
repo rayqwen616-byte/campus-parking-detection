@@ -30,6 +30,9 @@ import cv2
 import numpy as np
 
 
+DEFAULT_VEHICLE_LABELS = ("ebike", "bicycle")
+
+
 # ----------------------------------------------------------------- geometry
 def iou(a, b) -> float:
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])

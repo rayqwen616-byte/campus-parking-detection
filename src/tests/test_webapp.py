@@ -3,6 +3,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,6 +19,17 @@ def expect_error(fn, *a):
     except ValueError:
         return True
     return False
+
+
+class Tensor:
+    def __init__(self, value):
+        self.value = np.asarray(value)
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.value
 
 
 def main():
@@ -74,7 +86,37 @@ def main():
     # 11 非法 dataURL
     assert expect_error(webapp.decode_data_url, "http://example.com/a.jpg")
 
-    print("WEBAPP PASSED")
+    # 12 网页默认只保留车辆白名单，过滤人、汽车等通用模型类别
+    boxes = SimpleNamespace(
+        xyxy=Tensor([[0, 0, 30, 50], [35, 0, 65, 50], [0, 55, 30, 99], [35, 55, 65, 99]]),
+        cls=Tensor([0, 1, 2, 3]),
+        conf=Tensor([0.9, 0.8, 0.95, 0.85]),
+    )
+    result = SimpleNamespace(names={0: "ebike", 1: "bicycle", 2: "person", 3: "car"}, boxes=boxes)
+    original_model = webapp.State.model
+    webapp.State.model = lambda *args, **kwargs: [result]
+    try:
+        dets, summary = webapp.detect(np.zeros((100, 100, 3), dtype=np.uint8), 0.25, [])
+    finally:
+        webapp.State.model = original_model
+    assert [d["model_label"] for d in dets] == ["ebike", "bicycle"], dets
+    assert summary == {"total": 2, "inside": 0, "outside": 2}, summary
+
+    # 13 自动区域只接受 forbidden，passage 不得变成 L3 告警区
+    masks = np.zeros((2, 100, 100), dtype=np.float32)
+    masks[0, 10:60, 10:60] = 1
+    masks[1, 60:95, 60:95] = 1
+    seg_result = SimpleNamespace(
+        names={0: "forbidden", 1: "passage"},
+        boxes=SimpleNamespace(cls=Tensor([0, 1])),
+        masks=SimpleNamespace(data=Tensor(masks)),
+    )
+    auto_zones = webapp.zones_from_segmentation(seg_result, 100, 100)
+    assert len(auto_zones) == 1 and auto_zones[0]["level"] == 1, auto_zones
+    xs = [p[0] for p in auto_zones[0]["points"]]
+    assert max(xs) <= 0.6, auto_zones
+
+    print("WEBAPP PASSED (13 tests)")
 
 
 if __name__ == "__main__":
