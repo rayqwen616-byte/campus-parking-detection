@@ -4,19 +4,61 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install ultralytics opencv-python numpy Pillow
-      - name: Run tests
+
+      - name: Show environment
+        run: |
+          python -c "import sys; print(sys.version)"
+          python -c "import cv2, numpy; print('cv2', cv2.__version__, '| numpy', numpy.__version__)"
+          python -c "import ultralytics; print('ultralytics', ultralytics.__version__)"
+
+      - name: Run tests one by one
         working-directory: src
-        run: python tests/run_all.py
+        shell: pwsh
+        run: |
+          $fail = 0
+          $items = @(
+            @("judge_core 判定层自测", "judge_core.py"),
+            @("voc2yolo 配对逻辑", "tests/test_voc2yolo.py"),
+            @("webapp 后端单测", "tests/test_webapp.py"),
+            @("predict_zones 掩码提取", "tests/test_predict_zones.py"),
+            @("eval_zones 几何评测", "tests/test_eval_zones.py"),
+            @("demo_v8 端到端冒烟", "tests/smoke_v8.py")
+          )
+
+          foreach ($it in $items) {
+            $name = $it[0]
+            $file = $it[1]
+            Write-Host "================ $name ================"
+            python $file
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error title=$name::$file 运行失败（退出码 $LASTEXITCODE）"
+              $fail = 1
+            }
+          }
+
+          if ($fail -ne 0) {
+            Write-Host "::error title=测试失败::见上面标注的具体项"
+          } else {
+            Write-Host "全部通过"
+          }
+          exit $fail
