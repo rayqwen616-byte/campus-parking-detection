@@ -1,5 +1,14 @@
 # 校园非机动车违停检测系统
 
+<p align="center">
+  <a href="https://github.com/rayqwen616-byte/campus-parking-detection/actions/workflows/tests.yml"><img src="https://github.com/rayqwen616-byte/campus-parking-detection/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="python">
+  <img src="https://img.shields.io/badge/ultralytics-8.4-orange.svg" alt="ultralytics">
+  <img src="https://img.shields.io/badge/versions-v1%20~%20v11-8a2be2.svg" alt="versions">
+</p>
+
+
 **简体中文** | [English](README_EN.md)
 
 > 文档索引：[接口说明](docs/接口说明.md) ｜ [部署说明](docs/部署说明.md) ｜ [版本演进](docs/版本演进.md) ｜ [数据标注规范](docs/数据标注规范.md) ｜ [协作规范](CONTRIBUTING.md)
