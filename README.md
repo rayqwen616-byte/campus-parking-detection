@@ -20,6 +20,23 @@
 
 ---
 
+## 效果演示
+
+| 检测 + 脚点判定 | 区域自动识别 |
+|---|---|
+| ![detect](docs/images/detect_result.jpg) | ![zones](docs/images/zone_prediction.jpg) |
+| 框底边中点（脚点）落在禁停区内即标记 | 输入一张图，自动输出禁停区多边形 |
+
+| 标注示例 |
+|---|
+| ![anno](docs/images/annotation_example.jpg) |
+| labelme 多边形标注（红=禁停区，绿=通道） |
+
+**在线体验**：本项目为本地推理（CPU 可跑），无公网演示服务器。克隆后运行 `src/webapp.py` 即可在浏览器中使用。
+模型权重见 [Releases](https://github.com/rayqwen616-byte/campus-parking-detection/releases)。
+
+---
+
 ## 一、这个项目解决什么问题
 
 校园里电动车、自行车常被停在消防通道、楼道口、人行道上。目前依赖人工巡查，
