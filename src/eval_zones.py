@@ -27,7 +27,7 @@ from ultralytics import YOLO
 
 from predict_zones import imread_u, mask_to_polygons
 
-CLASSES = ["forbidden", "passage"]
+CLASSES = ["forbidden", "passage", "legal"]
 
 
 def poly_mask(poly, w, h):

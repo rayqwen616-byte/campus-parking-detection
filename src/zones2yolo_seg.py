@@ -3,7 +3,8 @@
 zones2yolo_seg.py —— 把 labelme 标注的多边形，转成 YOLO 分割数据集
 
 准备：
-    1. 用 labelme 打开图片，沿禁停区边界画多边形，类别填 forbidden 或 passage
+    1. 用 labelme 打开图片，沿边界画多边形，类别填 forbidden / passage / legal
+       （legal = 白线车位等合法停车区，用于和禁停区形成对比）
     2. 保存后会得到同名 .json 文件
 
 目录要求：
@@ -28,7 +29,7 @@ import random
 import shutil
 from pathlib import Path
 
-CLASSES = ["forbidden", "passage"]      # 0=禁停区，1=普通通道
+CLASSES = ["forbidden", "passage", "legal"]   # 0=禁停区 1=通道 2=合法车位（白线内）
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp"}
 
 

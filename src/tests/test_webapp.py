@@ -78,8 +78,9 @@ def main():
 
     # 10 JPEG 编解码往返
     img = np.full((120, 160, 3), 128, dtype=np.uint8)
-    url = webapp.encode_jpeg(img)
-    assert url.startswith("data:image/jpeg;base64,")
+    raw = webapp.encode_jpeg(img)
+    url = "data:image/jpeg;base64," + raw
+    assert raw.startswith("/9j/"), "应为纯 base64（JPEG 以 /9j/ 开头）"
     back = webapp.decode_data_url(url)
     assert back.shape[0] == 120 and back.shape[1] == 160
 

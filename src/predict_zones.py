@@ -25,10 +25,11 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-CLASSES = ["forbidden", "passage"]
+CLASSES = ["forbidden", "passage", "legal"]
 ZONE_CFG = {
     "forbidden": {"level": 1, "dwell": 10, "cooldown": 300, "color": [0, 0, 255]},
     "passage":   {"level": 3, "dwell": 180, "cooldown": 900, "color": [0, 200, 0]},
+    "legal":     {"level": 3, "dwell": 180, "cooldown": 900, "color": [200, 200, 0]},
 }
 
 
@@ -49,7 +50,12 @@ def clean_mask(mask, ksize=7):
 
 def mask_to_polygons(mask, w, h, eps_ratio=0.01, min_area_ratio=0.005,
                      morph=7, all_contours=False):
-    """掩码 → 若干多边形（归一化坐标）"""
+    """掩码 → 若干多边形（归一化坐标）
+
+    注意：ultralytics 返回的 masks.data 分辨率不是原图（比如 1279x1706 的图
+    会给出 480x640 的掩码）。归一化必须用掩码自身尺寸，否则坐标整体错位。
+    """
+    mh, mw = mask.shape[:2]
     m = clean_mask(mask, morph)
     contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -59,13 +65,13 @@ def mask_to_polygons(mask, w, h, eps_ratio=0.01, min_area_ratio=0.005,
 
     out = []
     for cnt in contours:
-        if cv2.contourArea(cnt) / float(w * h) < min_area_ratio:
+        if cv2.contourArea(cnt) / float(mw * mh) < min_area_ratio:
             continue
         peri = cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, eps_ratio * peri, True).reshape(-1, 2)
         if len(approx) < 3:
             continue
-        out.append([[round(float(x) / w, 4), round(float(y) / h, 4)] for x, y in approx])
+        out.append([[round(float(x) / mw, 4), round(float(y) / mh, 4)] for x, y in approx])
     out.sort(key=lambda p: -cv2.contourArea(np.array(p, dtype=np.float32)))
     return out
 
@@ -97,7 +103,7 @@ def build_zones(result, w, h, args):
         for k, poly in enumerate(polys):
             suffix = "" if len(polys) == 1 else "_%d" % (k + 1)
             zones.append({
-                "name": ("禁停区" if cls_name == "forbidden" else "通道") + suffix,
+                "name": {"forbidden": "禁停区", "passage": "通道", "legal": "合法车位"}.get(cls_name, "区域") + suffix,
                 "level": cfg["level"],
                 "dwell": cfg["dwell"],
                 "cooldown": cfg["cooldown"],

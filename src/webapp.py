@@ -80,7 +80,8 @@ def encode_jpeg(img, quality=88):
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         raise ValueError("结果图编码失败")
-    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+    # 前端会自行拼接 data URL 前缀，这里只返回纯 base64，避免双层前缀导致破图
+    return base64.b64encode(buf.tobytes()).decode()
 
 
 def zones_from_payload(items, w, h):
